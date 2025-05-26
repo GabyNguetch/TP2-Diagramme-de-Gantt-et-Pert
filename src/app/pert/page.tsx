@@ -399,253 +399,428 @@ export default function ModernPertDiagramGenerator() {
     return validationErrors.filter(error => error.taskIndex === taskIndex);
   };
 
-  const renderPertDiagram = () => {
-    if (pertNodes.length === 0 || pertEdges.length === 0) return null;
+const renderPertDiagram = () => {
+  if (pertNodes.length === 0 || pertEdges.length === 0) return null;
 
-    const svgWidth = Math.max(800, Math.max(...pertNodes.map(n => n.x)) + 200);
-    const svgHeight = Math.max(600, Math.max(...pertNodes.map(n => n.y)) + 200);
+  // Algorithme amélioré de positionnement des nœuds
+  const calculateNodePositions = () => {
+    const nodePositions = new Map();
+    const nodeLevels = new Map();
+    const processedNodes = new Set();
+    
+    // Identifier les niveaux hiérarchiques
+    const calculateLevels = (nodeId, level = 0) => {
+      if (processedNodes.has(nodeId)) return;
+      processedNodes.add(nodeId);
+      
+      const currentLevel = nodeLevels.get(nodeId) || 0;
+      nodeLevels.set(nodeId, Math.max(currentLevel, level));
+      
+      // Trouver les nœuds suivants
+      const outgoingEdges = pertEdges.filter(edge => edge.from === nodeId);
+      outgoingEdges.forEach(edge => {
+        calculateLevels(edge.to, level + 1);
+      });
+    };
+    
+    // Commencer par le nœud de début
+    calculateLevels('start', 0);
+    
+    // Organiser les nœuds par niveau
+    const nodesByLevel = new Map();
+    nodeLevels.forEach((level, nodeId) => {
+      if (!nodesByLevel.has(level)) {
+        nodesByLevel.set(level, []);
+      }
+      nodesByLevel.get(level).push(nodeId);
+    });
+    
+    // Calculer les positions
+    const levelWidth = 200;
+    const nodeSpacing = 120;
+    const maxNodesPerLevel = Math.max(...Array.from(nodesByLevel.values()).map(nodes => nodes.length));
+    
+    nodesByLevel.forEach((nodes, level) => {
+      const x = 100 + level * levelWidth;
+      const totalHeight = (nodes.length - 1) * nodeSpacing;
+      const startY = 100 + (maxNodesPerLevel * nodeSpacing - totalHeight) / 2;
+      
+      nodes.forEach((nodeId, index) => {
+        const y = startY + index * nodeSpacing;
+        nodePositions.set(nodeId, { x, y });
+      });
+    });
+    
+    return { nodePositions, maxLevel: Math.max(...nodeLevels.values()) };
+  };
+  
+  const { nodePositions, maxLevel } = calculateNodePositions();
+  
+  // Calculer la taille dynamique du SVG
+  const svgWidth = Math.max(800, (maxLevel + 2) * 200);
+  const svgHeight = Math.max(600, Math.max(...Array.from(nodePositions.values()).map(pos => pos.y)) + 150);
+  
+  // Fonction pour calculer le point de connexion optimal
+  const getConnectionPoint = (fromPos, toPos, radius = 35) => {
+    const dx = toPos.x - fromPos.x;
+    const dy = toPos.y - fromPos.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    const unitX = dx / distance;
+    const unitY = dy / distance;
+    
+    return {
+      from: {
+        x: fromPos.x + unitX * radius,
+        y: fromPos.y + unitY * radius
+      },
+      to: {
+        x: toPos.x - unitX * radius,
+        y: toPos.y - unitY * radius
+      }
+    };
+  };
 
-    return (
-      <div className="mt-8 bg-white/80 backdrop-blur-sm p-8 rounded-2xl shadow-xl border border-white/20">
-        <div className="flex items-center gap-3 mb-8">
-          <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl">
-            <Route className="w-6 h-6 text-white" />
-          </div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
-            Diagramme PERT
-          </h2>
+  return (
+    <div className="mt-8 bg-white/80 backdrop-blur-sm p-8 rounded-2xl shadow-xl border border-white/20">
+      <div className="flex items-center gap-3 mb-8">
+        <div className="p-2 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl">
+          <Route className="w-6 h-6 text-white" />
         </div>
-        
-        <div className="bg-gray-50 rounded-2xl p-6 mb-6 overflow-x-auto">
-          <svg width={svgWidth} height={svgHeight} className="w-full h-auto">
-            {/* Définir les marqueurs de flèches */}
-            <defs>
-              <marker id="arrowhead" markerWidth="10" markerHeight="7" 
-                      refX="9" refY="3.5" orient="auto">
-                <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280" />
-              </marker>
-              <marker id="arrowhead-critical" markerWidth="10" markerHeight="7" 
-                      refX="9" refY="3.5" orient="auto">
-                <polygon points="0 0, 10 3.5, 0 7" fill="#dc2626" />
-              </marker>
-            </defs>
+        <h2 className="text-3xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
+          Diagramme PERT
+        </h2>
+      </div>
+      
+      <div className="bg-gray-50 rounded-2xl p-6 mb-6 overflow-auto max-h-[600px]">
+        <svg 
+          width={svgWidth} 
+          height={svgHeight} 
+          className="w-full h-auto min-w-[800px]"
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          preserveAspectRatio="xMidYMid meet"
+        >
+          {/* Définir les marqueurs de flèches */}
+          <defs>
+            <marker 
+              id="arrowhead" 
+              markerWidth="12" 
+              markerHeight="10" 
+              refX="10" 
+              refY="5" 
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <polygon points="0 0, 12 5, 0 10" fill="#6b7280" />
+            </marker>
+            <marker 
+              id="arrowhead-critical" 
+              markerWidth="12" 
+              markerHeight="10" 
+              refX="10" 
+              refY="5" 
+              orient="auto"
+              markerUnits="strokeWidth"
+            >
+              <polygon points="0 0, 12 5, 0 10" fill="#dc2626" />
+            </marker>
             
-            {/* Dessiner les arêtes */}
-            {pertEdges.map((edge, index) => {
-              const fromNode = pertNodes.find(n => n.id === edge.from);
-              const toNode = pertNodes.find(n => n.id === edge.to);
-              
-              if (!fromNode || !toNode) return null;
-              
-              const isCriticalEdge = edge.isCritical || criticalPath.includes(edge.taskId);
-              const strokeColor = isCriticalEdge ? '#dc2626' : '#6b7280';
-              const strokeWidth = isCriticalEdge ? 3 : 2;
-              
-              const midX = (fromNode.x + toNode.x) / 2;
-              const midY = (fromNode.y + toNode.y) / 2 - 20;
-              
-              return (
-                <g key={index}>
-                  <line
-                    x1={fromNode.x + 40}
-                    y1={fromNode.y + 20}
-                    x2={toNode.x - 40}
-                    y2={toNode.y + 20}
-                    stroke={strokeColor}
-                    strokeWidth={strokeWidth}
-                    markerEnd={isCriticalEdge ? "url(#arrowhead-critical)" : "url(#arrowhead)"}
-                  />
-                  {edge.taskName && (
-                    <g>
-                      <rect
-                        x={midX - 35}
-                        y={midY - 15}
-                        width="70"
-                        height="30"
-                        fill="white"
-                        stroke={strokeColor}
-                        strokeWidth="1"
-                        rx="5"
-                      />
-                      <text
-                        x={midX}
-                        y={midY - 5}
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={strokeColor}
-                      >
-                        {edge.taskName}
-                      </text>
-                      <text
-                        x={midX}
-                        y={midY + 8}
-                        textAnchor="middle"
-                        fontSize="9"
-                        fill={strokeColor}
-                      >
-                        ({edge.duration}j)
-                      </text>
-                    </g>
-                  )}
-                </g>
-              );
-            })}
+            {/* Filtre pour l'ombre */}
+            <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="2" dy="2" stdDeviation="3" floodOpacity="0.3"/>
+            </filter>
+          </defs>
+          
+          {/* Dessiner les arêtes avec connexions optimisées */}
+          {pertEdges.map((edge, index) => {
+            const fromPos = nodePositions.get(edge.from);
+            const toPos = nodePositions.get(edge.to);
             
-            {/* Dessiner les nœuds */}
-            {pertNodes.map((node, index) => {
-              const isSpecialNode = node.isStart || node.isEnd;
-              const nodeColor = isSpecialNode ? '#059669' : '#3b82f6';
-              const textColor = 'white';
-              
-              return (
-                <g key={index}>
-                  <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r="30"
-                    fill={nodeColor}
-                    stroke="white"
-                    strokeWidth="2"
-                  />
-                  {isSpecialNode ? (
+            if (!fromPos || !toPos) return null;
+            
+            const isCriticalEdge = edge.isCritical || criticalPath.includes(edge.taskId);
+            const strokeColor = isCriticalEdge ? '#dc2626' : '#6b7280';
+            const strokeWidth = isCriticalEdge ? 3 : 2;
+            
+            const connectionPoints = getConnectionPoint(fromPos, toPos);
+            
+            // Calculer la position de l'étiquette sur la ligne
+            const midX = (connectionPoints.from.x + connectionPoints.to.x) / 2;
+            const midY = (connectionPoints.from.y + connectionPoints.to.y) / 2;
+            
+            // Décaler l'étiquette perpendiculairement à la ligne
+            const dx = connectionPoints.to.x - connectionPoints.from.x;
+            const dy = connectionPoints.to.y - connectionPoints.from.y;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            const offsetX = (-dy / length) * 25; // Décalage perpendiculaire
+            const offsetY = (dx / length) * 25;
+            
+            const labelX = midX + offsetX;
+            const labelY = midY + offsetY;
+            
+            return (
+              <g key={`edge-${index}`}>
+                {/* Ligne de connexion */}
+                <line
+                  x1={connectionPoints.from.x}
+                  y1={connectionPoints.from.y}
+                  x2={connectionPoints.to.x}
+                  y2={connectionPoints.to.y}
+                  stroke={strokeColor}
+                  strokeWidth={strokeWidth}
+                  markerEnd={isCriticalEdge ? "url(#arrowhead-critical)" : "url(#arrowhead)"}
+                  strokeDasharray={edge.duration === 0 ? "5,5" : "none"}
+                  opacity={edge.duration === 0 ? 0.6 : 1}
+                />
+                
+                {/* Étiquette de la tâche */}
+                {edge.taskName && edge.duration > 0 && (
+                  <g>
+                    <rect
+                      x={labelX - 40}
+                      y={labelY - 20}
+                      width="80"
+                      height="40"
+                      fill="white"
+                      stroke={strokeColor}
+                      strokeWidth="1"
+                      rx="8"
+                      filter="url(#shadow)"
+                      opacity="0.95"
+                    />
                     <text
-                      x={node.x}
-                      y={node.y + 5}
+                      x={labelX}
+                      y={labelY - 5}
                       textAnchor="middle"
-                      fontSize="12"
+                      fontSize="11"
+                      fontWeight="bold"
+                      fill={strokeColor}
+                    >
+                      {edge.taskName.length > 10 ? edge.taskName.substring(0, 10) + '...' : edge.taskName}
+                    </text>
+                    <text
+                      x={labelX}
+                      y={labelY + 10}
+                      textAnchor="middle"
+                      fontSize="10"
+                      fill={strokeColor}
+                      fontWeight="600"
+                    >
+                      ({edge.duration}j)
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+          
+          {/* Dessiner les nœuds */}
+          {pertNodes.map((node, index) => {
+            const position = nodePositions.get(node.id);
+            if (!position) return null;
+            
+            const isSpecialNode = node.isStart || node.isEnd;
+            const nodeColor = isSpecialNode ? '#059669' : '#3b82f6';
+            const textColor = 'white';
+            const radius = isSpecialNode ? 40 : 35;
+            
+            return (
+              <g key={`node-${index}`}>
+                {/* Cercle du nœud avec ombre */}
+                <circle
+                  cx={position.x}
+                  cy={position.y}
+                  r={radius}
+                  fill={nodeColor}
+                  stroke="white"
+                  strokeWidth="3"
+                  filter="url(#shadow)"
+                />
+                
+                {/* Contenu du nœud */}
+                {isSpecialNode ? (
+                  <text
+                    x={position.x}
+                    y={position.y + 5}
+                    textAnchor="middle"
+                    fontSize="12"
+                    fontWeight="bold"
+                    fill={textColor}
+                  >
+                    {node.isStart ? 'DÉBUT' : 'FIN'}
+                  </text>
+                ) : (
+                  <>
+                    {/* Temps au plus tôt */}
+                    <text
+                      x={position.x}
+                      y={position.y - 8}
+                      textAnchor="middle"
+                      fontSize="11"
                       fontWeight="bold"
                       fill={textColor}
                     >
-                      {node.isStart ? 'DÉBUT' : 'FIN'}
+                      {node.earliestTime}
                     </text>
-                  ) : (
-                    <>
-                      <text
-                        x={node.x}
-                        y={node.y - 5}
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={textColor}
-                      >
-                        {node.earliestTime}
-                      </text>
-                      <line
-                        x1={node.x - 20}
-                        y1={node.y}
-                        x2={node.x + 20}
-                        y2={node.y}
-                        stroke={textColor}
-                        strokeWidth="1"
-                      />
-                      <text
-                        x={node.x}
-                        y={node.y + 12}
-                        textAnchor="middle"
-                        fontSize="10"
-                        fontWeight="bold"
-                        fill={textColor}
-                      >
-                        {node.latestTime}
-                      </text>
-                    </>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-        </div>
+                    
+                    {/* Ligne de séparation */}
+                    <line
+                      x1={position.x - 25}
+                      y1={position.y}
+                      x2={position.x + 25}
+                      y2={position.y}
+                      stroke={textColor}
+                      strokeWidth="2"
+                    />
+                    
+                    {/* Temps au plus tard */}
+                    <text
+                      x={position.x}
+                      y={position.y + 15}
+                      textAnchor="middle"
+                      fontSize="11"
+                      fontWeight="bold"
+                      fill={textColor}
+                    >
+                      {node.latestTime}
+                    </text>
+                  </>
+                )}
+                
+                {/* ID du nœud (optionnel, pour debug) */}
+                <text
+                  x={position.x}
+                  y={position.y + radius + 15}
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#6b7280"
+                  fontWeight="500"
+                >
+                  {node.id.replace('node-', 'N')}
+                </text>
+              </g>
+            );
+          })}
+          
+          {/* Légende du chemin critique */}
+          <g transform="translate(20, 20)">
+            <rect x="0" y="0" width="200" height="80" fill="white" stroke="#e5e7eb" strokeWidth="1" rx="8" opacity="0.95"/>
+            <text x="10" y="20" fontSize="12" fontWeight="bold" fill="#374151">Légende</text>
+            <line x1="10" y1="35" x2="40" y2="35" stroke="#dc2626" strokeWidth="3" markerEnd="url(#arrowhead-critical)"/>
+            <text x="45" y="40" fontSize="10" fill="#374151">Chemin critique</text>
+            <line x1="10" y1="55" x2="40" y2="55" stroke="#6b7280" strokeWidth="2" markerEnd="url(#arrowhead)"/>
+            <text x="45" y="60" fontSize="10" fill="#374151">Chemin normal</text>
+          </g>
+        </svg>
+      </div>
 
-        {/* Tableau récapitulatif */}
-        <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl p-6 mb-6">
-          <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <Target className="w-5 h-5 text-blue-600" />
-            Analyse des Tâches
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-white rounded-lg">
-                  <th className="px-4 py-3 text-left font-semibold text-gray-800">Tâche</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Durée</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Début au + tôt</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Fin au + tôt</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Début au + tard</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Fin au + tard</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Marge totale</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-800">Critique</th>
+      {/* Contrôles de zoom et navigation */}
+      <div className="flex items-center gap-4 mb-6 bg-white/50 p-4 rounded-xl">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-700">Navigation:</span>
+          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+            Utilisez la molette pour zoomer, glissez pour naviguer
+          </span>
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+          <span className="text-sm text-gray-600">Chemin critique</span>
+          <div className="w-3 h-3 bg-blue-500 rounded-full ml-4"></div>
+          <span className="text-sm text-gray-600">Nœuds normaux</span>
+          <div className="w-3 h-3 bg-emerald-500 rounded-full ml-4"></div>
+          <span className="text-sm text-gray-600">Début/Fin</span>
+        </div>
+      </div>
+
+      {/* Tableau récapitulatif */}
+      <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl p-6 mb-6">
+        <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Target className="w-5 h-5 text-blue-600" />
+          Analyse des Tâches
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-white rounded-lg">
+                <th className="px-4 py-3 text-left font-semibold text-gray-800">Tâche</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Durée</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Début au + tôt</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Fin au + tôt</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Début au + tard</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Fin au + tard</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Marge totale</th>
+                <th className="px-4 py-3 text-center font-semibold text-gray-800">Critique</th>
+              </tr>
+            </thead>
+            <tbody className="space-y-2">
+              {tasks.map((task, index) => (
+                <tr key={task.id} className={`${task.isCritical ? 'bg-red-50' : 'bg-white'} rounded-lg`}>
+                  <td className="px-4 py-3 font-medium text-gray-800">{task.name}</td>
+                  <td className="px-4 py-3 text-center">{task.duration}</td>
+                  <td className="px-4 py-3 text-center">{task.earliestStart}</td>
+                  <td className="px-4 py-3 text-center">{task.earliestFinish}</td>
+                  <td className="px-4 py-3 text-center">{task.latestStart}</td>
+                  <td className="px-4 py-3 text-center">{task.latestFinish}</td>
+                  <td className="px-4 py-3 text-center">{task.totalFloat}</td>
+                  <td className="px-4 py-3 text-center">
+                    {task.isCritical ? (
+                      <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-semibold">
+                        OUI
+                      </span>
+                    ) : (
+                      <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-full text-xs">
+                        NON
+                      </span>
+                    )}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="space-y-2">
-                {tasks.map((task, index) => (
-                  <tr key={task.id} className={`${task.isCritical ? 'bg-red-50' : 'bg-white'} rounded-lg`}>
-                    <td className="px-4 py-3 font-medium text-gray-800">{task.name}</td>
-                    <td className="px-4 py-3 text-center">{task.duration}</td>
-                    <td className="px-4 py-3 text-center">{task.earliestStart}</td>
-                    <td className="px-4 py-3 text-center">{task.earliestFinish}</td>
-                    <td className="px-4 py-3 text-center">{task.latestStart}</td>
-                    <td className="px-4 py-3 text-center">{task.latestFinish}</td>
-                    <td className="px-4 py-3 text-center">{task.totalFloat}</td>
-                    <td className="px-4 py-3 text-center">
-                      {task.isCritical ? (
-                        <span className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-semibold">
-                          OUI
-                        </span>
-                      ) : (
-                        <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-full text-xs">
-                          NON
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
+      </div>
 
-        <div className="mt-8 pt-6 border-t border-gray-200">
-          <div className="grid grid-cols-4 gap-6">
-            <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200/50">
-              <div className="flex items-center gap-3 mb-2">
-                <Target className="w-5 h-5 text-blue-600" />
-                <span className="text-sm font-medium text-blue-800">Tâches</span>
-              </div>
-              <div className="text-3xl font-bold text-blue-600">{tasks.length}</div>
+      <div className="mt-8 pt-6 border-t border-gray-200">
+        <div className="grid grid-cols-4 gap-6">
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200/50">
+            <div className="flex items-center gap-3 mb-2">
+              <Target className="w-5 h-5 text-blue-600" />
+              <span className="text-sm font-medium text-blue-800">Tâches</span>
             </div>
-            <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-6 rounded-2xl border border-emerald-200/50">
-              <div className="flex items-center gap-3 mb-2">
-                <Calendar className="w-5 h-5 text-emerald-600" />
-                <span className="text-sm font-medium text-emerald-800">Durée projet</span>
-              </div>
-              <div className="text-3xl font-bold text-emerald-600">{projectDuration}j</div>
+            <div className="text-3xl font-bold text-blue-600">{tasks.length}</div>
+          </div>
+          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-6 rounded-2xl border border-emerald-200/50">
+            <div className="flex items-center gap-3 mb-2">
+              <Calendar className="w-5 h-5 text-emerald-600" />
+              <span className="text-sm font-medium text-emerald-800">Durée projet</span>
             </div>
-            <div className="bg-gradient-to-br from-red-50 to-red-100 p-6 rounded-2xl border border-red-200/50">
-              <div className="flex items-center gap-3 mb-2">
-                <Route className="w-5 h-5 text-red-600" />
-                <span className="text-sm font-medium text-red-800">Tâches critiques</span>
-              </div>
-              <div className="text-3xl font-bold text-red-600">{criticalPath.length}</div>
+            <div className="text-3xl font-bold text-emerald-600">{projectDuration}j</div>
+          </div>
+          <div className="bg-gradient-to-br from-red-50 to-red-100 p-6 rounded-2xl border border-red-200/50">
+            <div className="flex items-center gap-3 mb-2">
+              <Route className="w-5 h-5 text-red-600" />
+              <span className="text-sm font-medium text-red-800">Tâches critiques</span>
             </div>
-            <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200/50">
-              <div className="flex items-center gap-3 mb-2">
-                <Zap className="w-5 h-5 text-purple-600" />
-                <span className="text-sm font-medium text-purple-800">Durée moyenne</span>
-              </div>
-              <div className="text-3xl font-bold text-purple-600">
-                {tasks.length > 0 ? Math.round(tasks.reduce((sum, task) => sum + task.duration, 0) / tasks.length) : 0}j
-              </div>
+            <div className="text-3xl font-bold text-red-600">{criticalPath.length}</div>
+          </div>
+          <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200/50">
+            <div className="flex items-center gap-3 mb-2">
+              <Zap className="w-5 h-5 text-purple-600" />
+              <span className="text-sm font-medium text-purple-800">Durée moyenne</span>
+            </div>
+            <div className="text-3xl font-bold text-purple-600">
+              {tasks.length > 0 ? Math.round(tasks.reduce((sum, task) => sum + task.duration, 0) / tasks.length) : 0}j
             </div>
           </div>
         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-indigo-100 p-6">
-            <header className="sticky top-0 z-50 w-full border-b border-slate-200/60 bg-white/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 w-full border-b border-slate-200/60 bg-white/80 backdrop-blur-xl">
         <div className="container flex h-16 items-center justify-between px-4 md:px-6">
           <div className="flex items-center gap-3 font-bold text-slate-800">
             <div className="relative">
